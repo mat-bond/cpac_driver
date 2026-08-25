@@ -1,6 +1,11 @@
 import asyncio
 
-from pylabrobot.inheco.control_box import InhecoTECControlBox # type: ignore
+from pylabrobot.inheco.control_box import InhecoTECControlBox
+
+async def send(box, command):
+    response = await box.send_command(command)
+    await asyncio.sleep(0.1)
+    return response
 
 
 CONTROLLER_TYPES = {
@@ -22,11 +27,6 @@ DEVICE_TYPES = {
     14: "Teleshake 95 AC",
     15: "CPLC2",
 }
-
-async def send(box, command):
-    response = await box.send_command(command)
-    await asyncio.sleep(0.1)
-    return response
 
 async def main():
     box = InhecoTECControlBox()
@@ -85,10 +85,35 @@ async def main():
                 else:
                     print(f"Slot {slot}: query failed: {exc}")
 
+        print("\nReading CPAC temperatures:")
+
+        print("\nReading CPAC details:")
+
+        for slot in (1, 2):
+            fw = await send(box, f"{slot}RFV1")
+            actual = int(await send(box, f"{slot}RAT")) / 10
+            target = int(await send(box, f"{slot}RTT")) / 10 # RTT: Report Target Temperature
+            minimum = int(await send(box, f"{slot}RLT")) / 10 # RLT: Report lowest allowed Device Temperature 
+            maximum = int(await send(box, f"{slot}RMT1")) / 10
+            mode = await send(box, f"{slot}RHE") # RHE: Report Heater Enable Status (heating/cooling)
+
+            print(f"\nSlot {slot}")
+            print(f"  Firmware: {fw}")
+            print(f"  Actual:   {actual:.1f} °C")
+            print(f"  Target:   {target:.1f} °C")
+            print(f"  Range:    {minimum:.1f}–{maximum:.1f} °C")
+            print(f"  Mode:     {mode}")
+
+        print("\nReading error memory:")
+
+        for slot in (1, 2):
+            errors = await send(box, f"{slot}REC")
+            print(f"Slot {slot}: errors={errors}")
+
     finally:
         await box.stop()
         print("Connection closed.")
-        
+
 if __name__ == "__main__":
     asyncio.run(main())
     
