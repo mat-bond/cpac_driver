@@ -9,6 +9,17 @@ class DriverState(str, Enum):
     RUNNING = "running"
     ERROR = "error"
 
+class CPACMode(str, Enum):
+    HEATING = "heating"
+    COOLING = "cooling"
+    OFF = "off"
+
+CPAC_MODE_MAP = {
+    0: CPACMode.HEATING,
+    1: CPACMode.COOLING,
+    2: CPACMode.OFF,
+}
+
 class CPACDriver:
     def __init__(self, slot: int):
         if slot not in range(1, 7):
@@ -45,6 +56,16 @@ class CPACDriver:
                 f"Driver is not ready for commands (state={self.state.value})"
             )
 
+    async def _read_mode(self):
+        mode_raw = int(
+                await self._send(f"{self.slot}RHE")
+            )
+        try:
+            mode = CPAC_MODE_MAP[mode_raw]
+        except KeyError:
+            raise RuntimeError(f"Unknown CPAC mode: {mode_raw}")
+        return mode
+    
     async def initialize(self):
         self.state = DriverState.INITIALIZING
 
@@ -102,16 +123,14 @@ class CPACDriver:
                 int(await self._send(f"{self.slot}RAT")) / 10
             )
 
-            mode = int(
-                await self._send(f"{self.slot}RHE")
-            )
+            mode = await self._read_mode()
 
             errors = await self._send(
                 f"{self.slot}REC"
             )
 
             # Do not alter existing hardware state.
-            if mode == 2:
+            if mode == CPACMode.OFF:
                 self.state = DriverState.READY
             else:
                 self.state = DriverState.RUNNING
@@ -135,11 +154,44 @@ class CPACDriver:
             self.last_error = str(exc)
             raise
 
-    async def get_actual_temperature(self):
-        ...
+    async def get_actual_temperature(self) -> float:
+        self._ensure_ready()
+
+        raw = await self._send(f"{self.slot}RAT")
+        return int(raw) / 10
 
     async def get_status(self):
-        ...
+        self._ensure_ready()
+
+        actual_temperature = (
+            int(await self._send(f"{self.slot}RAT")) / 10
+        )
+
+        mode_raw = int(
+            await self._send(f"{self.slot}RHE")
+        )
+
+        try:
+            mode = CPAC_MODE_MAP[mode_raw]
+        except KeyError:
+            raise RuntimeError(f"Unknown CPAC mode: {mode_raw}")
+
+        errors = await self._send(
+            f"{self.slot}REC"
+        )
+
+        if mode == CPACMode.OFF:
+            self.state = DriverState.READY
+        else:
+            self.state = DriverState.RUNNING
+
+        return {
+            "state": self.state,
+            "slot": self.slot,
+            "actual_temperature_c": actual_temperature,
+            "mode": mode,
+            "errors": errors,
+        }
 
     async def get_parameters(self):
         ...
