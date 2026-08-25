@@ -68,7 +68,7 @@ async def test_get_configuration():
         await driver.initialize()
 
         parameters = await driver.get_configuration()
-        print("\nParameters: ")
+        print("\nConfiguration: ")
 
         for key, value in parameters.items():
             print(f"  {key}: {value}")
@@ -154,21 +154,6 @@ async def test_abort():
         # Only close the HID connection.
         await driver.box.stop()
 
-async def test_error_6_details():
-    driver = CPACDriver(slot=1)
-
-    try:
-        await driver.initialize()
-
-        errors = await driver._send(f"{driver.slot}REC")
-        print(f"\nStored errors: {errors}")
-
-        details = await driver._send(f"{driver.slot}REC6")
-        print(f"Error 6 details: {details}")
-
-    finally:
-        await driver.box.stop()
-
 async def test_reset():
     driver = CPACDriver(slot=1)
 
@@ -193,6 +178,33 @@ async def test_reset():
     finally:
         await driver.box.stop()
 
+async def test_stop():
+    driver = CPACDriver(slot=1)
+
+    try:
+        await driver.initialize()
+        await driver.set_parameters(20.0)
+
+        await driver.start()
+
+        print("\nRunning for 10 seconds...")
+        await asyncio.sleep(10)
+
+        result = await driver.stop()
+
+        print("\nStop result:")
+        for key, value in result.items():
+            print(f"  {key}: {value}")
+
+        status = await driver.get_status()
+
+        print("\nStatus after stop:")
+        for key, value in status.items():
+            print(f"  {key}: {value}")
+
+    finally:
+        await driver.box.stop()
+
 async def main():
     #await test_initialize()
     #await test_get_temperature()
@@ -201,8 +213,10 @@ async def main():
     #await test_get_configuration()
     #await test_set_parameters()
     #await test_start()
+    #await test_stop()
     #await test_abort()
-    await test_reset()
+    #await test_reset()
+    pass
 
 if __name__ == "__main__":
     asyncio.run(main())

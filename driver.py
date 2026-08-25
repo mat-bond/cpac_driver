@@ -41,20 +41,27 @@ class CPACDriver:
         self.last_error = None
         self.controller_type = None
 
-    async def _send(self, command: str):
+    async def _send(
+        self,
+        command: str,
+        timeout: float = 2.0,
+    ):
         async with self.lock:
-            #print(f">> {command}")
-
             try:
+                device_timeout = max(1, int(timeout))
+
                 response = await asyncio.wait_for(
-                    self.box.send_command(command),
-                    timeout=2.0,
+                    self.box.send_command(
+                        command,
+                        timeout=device_timeout,
+                    ),
+                    # Slightly longer than PyLabRobot's own timeout.
+                    timeout=device_timeout + 1.0,
                 )
 
-                #print(f"<< {response}")
                 return response
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 print(f"!! timeout: {command}")
                 raise RuntimeError(
                     f"Timeout waiting for response to {command}"
@@ -101,43 +108,6 @@ class CPACDriver:
         raise RuntimeError(
         "Driver is in aborted state. Reset is required before continuing."
     )
-
-    async def _set_pid(
-        self,
-        selector: int,
-        pid: dict,
-    ):
-        allowed = {"p", "i", "d"}
-
-        unknown = set(pid) - allowed
-        if unknown:
-            raise ValueError(
-                f"Unknown PID parameters: {unknown}"
-            )
-
-        for name, value in pid.items():
-            if not isinstance(value, int):
-                raise ValueError(
-                    f"PID {name.upper()} must be an integer"
-                )
-
-            if not 0 <= value <= 255:
-                raise ValueError(
-                    f"PID {name.upper()} must be between 0 and 255"
-                )
-
-        commands = {
-            "p": "SPP",
-            "i": "SPI",
-            "d": "SPD",
-        }
-
-        for name, value in pid.items():
-            command = commands[name]
-
-            await self._send(
-                f"0{command}{self.slot},{selector},{value}"
-            )
     
     async def initialize(self):
         self.state = DriverState.INITIALIZING
@@ -281,11 +251,6 @@ class CPACDriver:
     async def get_configuration(self):
         self._ensure_connected()
 
-        # Basic temperature parameters.
-        target_temperature = (
-            int(await self._send(f"{self.slot}RTT")) / 10
-        )
-
         min_temperature = (
             int(await self._send(f"{self.slot}RLT")) / 10
         )
@@ -294,7 +259,6 @@ class CPACDriver:
             int(await self._send(f"{self.slot}RMT1")) / 10
         )
 
-        # Temperature compensation / tuning.
         heat_cool_offset = (
             int(await self._send(f"{self.slot}RHO")) / 10
         )
@@ -303,7 +267,7 @@ class CPACDriver:
             int(await self._send(f"{self.slot}RCO")) / 100
         )
 
-        room_temperature = (
+        compensation_room_temperature = (
             int(await self._send(f"{self.slot}RRT")) / 10
         )
 
@@ -315,7 +279,6 @@ class CPACDriver:
             await self._send(f"{self.slot}RBT")
         )
 
-        # PID coefficients.
         pid_heating = {
             "p": int(await self._send(f"{self.slot}RPP0")),
             "i": int(await self._send(f"{self.slot}RPI0")),
@@ -344,10 +307,7 @@ class CPACDriver:
         )
 
         return {
-            "slot": self.slot,
-
-            "temperature": {
-                "target_c": target_temperature,
+            "temperature_limits": {
                 "min_allowed_c": min_temperature,
                 "max_allowed_c": max_temperature,
             },
@@ -355,7 +315,7 @@ class CPACDriver:
             "offsets": {
                 "heat_cool_offset_c": heat_cool_offset,
                 "constant_offset_c": constant_offset,
-                "room_temperature_c": room_temperature,
+                "compensation_room_temperature_c": compensation_room_temperature,
             },
 
             "boost": {
@@ -397,95 +357,6 @@ class CPACDriver:
         return {
             "target_temperature_c": reported_target,
         }
-
-    async def set_configuration(
-        self,
-        *,
-        compensation_room_temperature_c: float | None = None,
-        boost_offset_c: float | None = None,
-        boost_time_s: int | None = None,
-        heating_pid: dict | None = None,
-        cooling_pid: dict | None = None,
-    ):
-        self._ensure_ready()
-
-        # Do not change tuning while temperature regulation is active.
-        if self.state != DriverState.READY:
-            raise RuntimeError(
-                "Configuration can only be changed while the CPAC is stopped"
-            )
-
-        # Room temperature used for compensation.
-        if compensation_room_temperature_c is not None:
-            if not 0 <= compensation_room_temperature_c <= 51.0:
-                raise ValueError(
-                    "Compensation room temperature must be "
-                    "between 0 and 51 °C"
-                )
-
-            raw = int(round(
-                compensation_room_temperature_c * 10
-            ))
-
-            # Write to external device EEPROM through mainboard.
-            await self._send(
-                f"0SRT{self.slot},{raw}"
-            )
-
-        # Boost offset.
-        if boost_offset_c is not None:
-            if not 0 <= boost_offset_c <= 30.0:
-                raise ValueError(
-                    "Boost offset must be between 0 and 30 °C"
-                )
-
-            raw = int(round(boost_offset_c * 10))
-
-            await self._send(
-                f"{self.slot}SBO{raw}"
-            )
-
-        # Boost time.
-        if boost_time_s is not None:
-            if not isinstance(boost_time_s, int):
-                raise ValueError(
-                    "Boost time must be an integer"
-                )
-
-            if not 0 <= boost_time_s <= 30000:
-                raise ValueError(
-                    "Boost time must be between 0 and 30000 seconds"
-                )
-
-            await self._send(
-                f"{self.slot}SBT{boost_time_s}"
-            )
-
-        pid_changed = False
-
-        # Heating PID: selector 0.
-        if heating_pid is not None:
-            await self._set_pid(
-                selector=0,
-                pid=heating_pid,
-            )
-            pid_changed = True
-
-        # Cooling PID: selector 1.
-        if cooling_pid is not None:
-            await self._set_pid(
-                selector=1,
-                pid=cooling_pid,
-            )
-            pid_changed = True
-
-        # External EEPROM PID changes can take several seconds
-        # before the slot reports the new values.
-        if pid_changed:
-            await asyncio.sleep(4.0)
-
-        # Read back actual configuration from hardware.
-        return await self.get_configuration()
 
     async def start(self):
         self._ensure_ready()
@@ -643,6 +514,8 @@ class CPACDriver:
             raise
 
     async def abort(self):
+        await self.stop()
+
         self._ensure_ready()
 
         await self._send("0AEO")
