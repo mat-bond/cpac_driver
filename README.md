@@ -871,9 +871,3 @@ FastAPI uses a lifespan handler to close the HID connection when the application
 The service does not automatically stop active temperature regulation on web-server shutdown. Hardware state and transport lifetime are deliberately separate concerns.
 
 If application policy requires stopping the device before process exit, add that behavior explicitly and validate it for the target workflow rather than assuming that closing USB communication should alter the current CPAC state.
-
----
-
-## License
-
-Add the appropriate project or organization license here.
