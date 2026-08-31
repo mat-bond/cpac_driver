@@ -513,28 +513,6 @@ The current API considers `ready`, `running`, and `aborted` to be connected/heal
 The `last_error` field stores the latest initialization/reset-level driver failure when available.
 
 ---
-
-## HTTP Error Handling
-
-Driver exceptions are translated into useful HTTP responses.
-
-| HTTP Status | Meaning |
-|---|---|
-| `422 Unprocessable Entity` | Invalid user parameter, such as an out-of-range target temperature |
-| `409 Conflict` | Driver state does not permit the requested operation |
-| `504 Gateway Timeout` | Hardware did not respond within the command timeout |
-| `500 Internal Server Error` | Unexpected hardware, protocol, or driver failure |
-
-Example invalid target response:
-
-```json
-{
-  "detail": "Target temperature must be between -9.9 and 120.0 °C"
-}
-```
-
----
-
 ## Installation
 
 Create and activate a project virtual environment:
